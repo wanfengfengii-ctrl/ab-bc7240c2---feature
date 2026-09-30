@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>同步辐射束线曝光排程</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>同步辐射束线 · 探测器曝光排程</h1>
+    <div id="api-health" class="health-pill" title="API 健康状态">检测中…</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="card-head">
+        <h2>曝光录入（5–10 项）</h2>
+        <div class="row-actions">
+          <button id="add-exp" type="button" class="btn secondary">＋ 增加曝光</button>
+          <button id="del-exp" type="button" class="btn secondary">－ 移除末项</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="exp-table">
+          <thead>
+            <tr>
+              <th>#</th><th>编号</th><th>持续时间</th>
+              <th>最早开始</th><th>最晚开始</th>
+              <th>设备</th><th>冷却时间</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>衔接约束</h2>
+        <div class="row-actions">
+          <label class="horizon">时间范围 H：
+            <input id="horizon" type="number" min="1" max="1000000" value="1000" />
+          </label>
+          <button id="add-link" type="button" class="btn secondary">＋ 增加约束</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="link-table">
+          <thead>
+            <tr>
+              <th>前序曝光</th><th>后续曝光</th>
+              <th>最小间隔</th><th>最大间隔（可空）</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p class="hint">间隔定义：后续开始时刻 −（前序开始时刻 + 前序持续时间）。冷却由系统自动占用同设备，不需重复录入。</p>
+      </div>
+    </section>
+
+    <div class="solve-bar">
+      <button id="solve-btn" type="button" class="btn primary">求解排程</button>
+      <span id="form-msg" class="form-msg"></span>
+    </div>
+
+    <div id="stale-banner" class="banner stale hidden">
+      草稿已修改，以下旧结果已失效；请重新求解。
+    </div>
+
+    <section id="input-error-panel" class="card error-card hidden">
+      <h2>输入错误</h2>
+      <p>以下问题导致请求无法提交，排程器未运行：</p>
+      <ul id="field-error-list"></ul>
+    </section>
+
+    <section id="infeasible-panel" class="card warn-card hidden">
+      <h2>无可执行时序</h2>
+      <p>输入通过了全部校验，但不存在同时满足时间窗、设备占用（含冷却）与衔接约束的整数开始时刻组合。</p>
+      <p class="hint">建议：放宽最晚开始时刻、缩短冷却、错开设备或放松最大衔接间隔。不会返回任何部分曝光方案，也不会沿用旧方案。</p>
+    </section>
+
+    <section id="result-panel" class="card hidden">
+      <h2>最优排程结果</h2>
+      <div class="metrics">
+        <div class="metric"><span class="metric-label">最终结束时刻</span><strong id="m-makespan">–</strong></div>
+        <div class="metric"><span class="metric-label">开始时刻总和</span><strong id="m-sum">–</strong></div>
+        <div class="metric"><span class="metric-label">开始时刻序列（按录入顺序）</span><strong id="m-vector">–</strong></div>
+        <div class="metric"><span class="metric-label">求解耗时</span><strong id="m-time">–</strong></div>
+      </div>
+
+      <h3>时间轴</h3>
+      <div id="gantt" class="gantt"></div>
+      <div class="legend">
+        <span class="legend-item"><i class="sw exposure"></i>曝光执行</span>
+        <span class="legend-item"><i class="sw cooling"></i>设备冷却占用</span>
+        <span class="legend-item"><i class="sw window"></i>可开始时间窗</span>
+      </div>
+
+      <h3>设备执行顺序</h3>
+      <div id="equipment-orders" class="orders"></div>
+
+      <h3>每条约束余量</h3>
+      <div class="table-wrap">
+        <table id="slack-table">
+          <thead>
+            <tr><th>约束</th><th>要求区间</th><th>实际间隔</th><th>对最大间隔余量</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
