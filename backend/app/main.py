@@ -38,6 +38,7 @@ def schedule(req: ScheduleRequest) -> JSONResponse:
                 "sum_starts": None,
                 "slacks": None,
                 "equipment_orders": None,
+                "calibrations": None,
                 "solver_time_ms": None,
             },
         )
@@ -56,6 +57,7 @@ def schedule(req: ScheduleRequest) -> JSONResponse:
                 "sum_starts": None,
                 "slacks": None,
                 "equipment_orders": None,
+                "calibrations": None,
                 "solver_time_ms": None,
             },
         )
@@ -74,6 +76,7 @@ def schedule(req: ScheduleRequest) -> JSONResponse:
                 "sum_starts": None,
                 "slacks": None,
                 "equipment_orders": None,
+                "calibrations": None,
                 "solver_time_ms": None,
             },
         )

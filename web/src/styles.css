@@ -172,3 +172,24 @@ td .btn { padding: 3px 9px; font-size: 12px; }
   border-radius: 999px; padding: 3px 12px;
 }
 .arrow { color: var(--muted); }
+
+/* ---- readout-mode registry editor ---- */
+.enable-toggle { font-size: 13px; color: var(--text); display: inline-flex; gap: 6px; align-items: center; }
+.mode-editor { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.mode-editor.disabled-paint { opacity: .55; }
+.mode-editor.disabled-paint input,
+.mode-editor.disabled-paint button { pointer-events: none; }
+.mode-eq {
+  background: var(--card-2); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px 14px;
+}
+.mode-eq-head { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; flex-wrap: wrap; }
+.mode-eq-head .eq-name { font-weight: 600; color: var(--accent-2); }
+.mode-eq-head label { font-size: 12px; color: var(--muted); }
+.mode-eq-head input {
+  width: 130px; background: #0f1622; border: 1px solid var(--line);
+  color: var(--text); border-radius: 6px; padding: 6px 8px; margin-left: 6px;
+}
+.tr-table { margin-bottom: 8px; }
+td.cell-mode input { width: 90px; }
+.sw.calibration { background: var(--warn); opacity: .9; }

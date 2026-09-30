@@ -4,13 +4,17 @@
 const state = {
   horizon: 1000,
   exposures: [
-    { id: "A", duration: 4, earliest_start: 0, latest_start: 50, equipment: "X", cooling: 2 },
-    { id: "B", duration: 3, earliest_start: 0, latest_start: 50, equipment: "X", cooling: 1 },
-    { id: "C", duration: 5, earliest_start: 0, latest_start: 50, equipment: "Y", cooling: 0 },
-    { id: "D", duration: 2, earliest_start: 0, latest_start: 50, equipment: "Y", cooling: 3 },
-    { id: "E", duration: 6, earliest_start: 2, latest_start: 40, equipment: "Z", cooling: 0 },
+    { id: "A", duration: 4, earliest_start: 0, latest_start: 50, equipment: "X", cooling: 2, mode: "" },
+    { id: "B", duration: 3, earliest_start: 0, latest_start: 50, equipment: "X", cooling: 1, mode: "" },
+    { id: "C", duration: 5, earliest_start: 0, latest_start: 50, equipment: "Y", cooling: 0, mode: "" },
+    { id: "D", duration: 2, earliest_start: 0, latest_start: 50, equipment: "Y", cooling: 3, mode: "" },
+    { id: "E", duration: 6, earliest_start: 2, latest_start: 40, equipment: "Z", cooling: 0, mode: "" },
   ],
   links: [{ from_id: "A", to_id: "B", min_gap: 0, max_gap: "" }],
+  // Readout-mode calibration is opt-in. modeRegistries is keyed by equipment:
+  // { initial: string, transitions: [{from, to, duration}] }.
+  modeEnabled: false,
+  modeRegistries: {},
   result: null,
   stale: false,
 };
@@ -32,6 +36,11 @@ function renderExpRows() {
       <td><input type="number" min="0" step="1" data-i="${i}" data-k="latest_start" value="${row.latest_start}"></td>
       <td class="cell-eq"><input data-i="${i}" data-k="equipment" value="${row.equipment}"></td>
       <td><input type="number" min="0" step="1" data-i="${i}" data-k="cooling" value="${row.cooling}"></td>
+      <td class="cell-mode">
+        <input data-i="${i}" data-k="mode" value="${row.mode || ""}"
+          placeholder="${state.modeEnabled ? "必填" : "—" }"
+          ${state.modeEnabled ? "" : "disabled"}>
+      </td>
       <td><button type="button" class="btn secondary" data-del-i="${i}">删除</button></td>`;
     tbody.appendChild(tr);
   });
@@ -57,9 +66,10 @@ function onExpInput(ev) {
   const i = Number(ev.target.dataset.i);
   const k = ev.target.dataset.k;
   let v = ev.target.value;
-  if (k !== "id" && k !== "equipment") v = v === "" ? "" : Number(v);
+  if (k !== "id" && k !== "equipment" && k !== "mode") v = v === "" ? "" : Number(v);
   state.exposures[i][k] = v;
   if (k === "id") syncLinkIdOptions();
+  if (k === "equipment") renderModeEditor();
   markDirty();
 }
 
@@ -122,9 +132,111 @@ function reconcileLinks() {
   state.links = state.links.filter((l) => ids.has(l.from_id) && ids.has(l.to_id));
 }
 
+/* ---------------- readout-mode registry editor ---------------- */
+
+function equipmentNames() {
+  return [...new Set(state.exposures.map((e) => String(e.equipment).trim()).filter(Boolean))].sort();
+}
+
+function registryFor(eq) {
+  if (!state.modeRegistries[eq]) {
+    state.modeRegistries[eq] = { initial: "", transitions: [] };
+  }
+  return state.modeRegistries[eq];
+}
+
+function renderModeEditor() {
+  const host = $("#mode-editor");
+  host.innerHTML = "";
+  host.classList.toggle("disabled-paint", !state.modeEnabled);
+  const eqs = equipmentNames();
+  if (!eqs.length) {
+    host.innerHTML = `<p class="hint">请先在曝光表中填写设备名称。</p>`;
+    return;
+  }
+  eqs.forEach((eq) => {
+    const reg = registryFor(eq);
+    const card = document.createElement("div");
+    card.className = "mode-eq";
+    const rows = reg.transitions.map((tr, ti) => `
+      <tr>
+        <td><input data-eq="${escapeAttr(eq)}" data-ti="${ti}" data-tk="from" value="${escapeAttr(tr.from)}"></td>
+        <td><input data-eq="${escapeAttr(eq)}" data-ti="${ti}" data-tk="to" value="${escapeAttr(tr.to)}"></td>
+        <td><input type="number" min="0" step="1" data-eq="${escapeAttr(eq)}" data-ti="${ti}" data-tk="duration" value="${tr.duration}"></td>
+        <td><button type="button" class="btn secondary" data-del-tr="${eq}" data-ti="${ti}">删除</button></td>
+      </tr>`).join("");
+    card.innerHTML = `
+      <div class="mode-eq-head">
+        <span class="eq-name">${escapeHtml(eq)}</span>
+        <label>初始模式 <input data-eq="${escapeAttr(eq)}" data-k="initial"
+          value="${escapeAttr(reg.initial)}" ${state.modeEnabled ? "" : "disabled"}></label>
+      </div>
+      <table class="tr-table">
+        <thead><tr><th>从模式</th><th>到模式</th><th>校准耗时</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <button type="button" class="btn secondary" data-add-tr="${escapeAttr(eq)}">＋ 增加有向切换</button>`;
+    host.appendChild(card);
+  });
+
+  host.querySelectorAll("input[data-k='initial']").forEach((el) => {
+    el.addEventListener("input", onModeInput);
+  });
+  host.querySelectorAll("input[data-tk]").forEach((el) => {
+    el.addEventListener("input", onModeInput);
+  });
+  host.querySelectorAll("button[data-add-tr]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      registryFor(btn.dataset.addTr).transitions.push({ from: "", to: "", duration: 0 });
+      markDirty();
+      renderModeEditor();
+    });
+  });
+  host.querySelectorAll("button[data-del-tr]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const reg = state.modeRegistries[btn.dataset.delTr];
+      reg.transitions.splice(Number(btn.dataset.ti), 1);
+      markDirty();
+      renderModeEditor();
+    });
+  });
+}
+
+function onModeInput(ev) {
+  const el = ev.target;
+  const eq = el.dataset.eq;
+  const reg = state.modeRegistries[eq];
+  if (el.dataset.k === "initial") {
+    reg.initial = el.value.trim();
+  } else {
+    const tr = reg.transitions[Number(el.dataset.ti)];
+    const tk = el.dataset.tk;
+    tr[tk] = tk === "duration" ? (el.value === "" ? "" : Number(el.value)) : el.value.trim();
+  }
+  markDirty();
+}
+
+function buildModesPayload() {
+  const out = {};
+  equipmentNames().forEach((eq) => {
+    const reg = state.modeRegistries[eq];
+    if (!reg || !reg.initial) return; // client-side validation rejects this
+    out[eq] = {
+      initial_mode: reg.initial,
+      transitions: reg.transitions.map((tr) => ({
+        from_mode: tr.from,
+        to_mode: tr.to,
+        duration: tr.duration,
+      })),
+    };
+  });
+  return out;
+}
+
 function renderAll() {
   renderExpRows();
   renderLinkRows();
+  renderModeEditor();
 }
 
 /* ---------------- draft invalidation ---------------- */
@@ -174,6 +286,51 @@ function validateDraft() {
   const dupes = ids.filter((id, i) => id && ids.indexOf(id) !== i);
   [...new Set(dupes)].forEach((d) => errors.push(`曝光编号重复：${d}`));
 
+  if (state.modeEnabled) {
+    // Build registries from the current equipment set; stale keys are ignored.
+    const eqSet = new Set(equipmentNames());
+    const declaredModes = {};
+    eqSet.forEach((eq) => {
+      const reg = state.modeRegistries[eq];
+      declaredModes[eq] = new Set();
+      if (!reg || !reg.initial) {
+        errors.push(`设备 ${eq}：启用模式后必须登记初始模式`);
+      } else {
+        declaredModes[eq].add(reg.initial);
+      }
+      if (reg) {
+        const pairSeen = new Set();
+        reg.transitions.forEach((tr, ti) => {
+          const tag = `设备 ${eq} 切换 ${ti + 1}`;
+          if (!tr.from || !tr.to) {
+            errors.push(`${tag}：从/到模式不能为空（未登记转换不可达）`);
+            return;
+          }
+          const key = `${tr.from}->${tr.to}`;
+          if (pairSeen.has(key)) {
+            errors.push(`${tag}：有向切换 ${key} 与前一行冲突（重复登记）`);
+          }
+          pairSeen.add(key);
+          declaredModes[eq].add(tr.from);
+          declaredModes[eq].add(tr.to);
+          if (!Number.isInteger(tr.duration) || tr.duration < 0) {
+            errors.push(`${tag}：校准耗时必须是非负整数`);
+          }
+        });
+      }
+    });
+    state.exposures.forEach((e, idx) => {
+      const tag = `第 ${idx + 1} 项（${e.id || "未命名"}）`;
+      const eq = String(e.equipment).trim();
+      const mode = String(e.mode || "").trim();
+      if (!mode) {
+        errors.push(`${tag}：设备 ${eq} 已启用模式，但未选择所需读出模式`);
+      } else if (declaredModes[eq] && !declaredModes[eq].has(mode)) {
+        errors.push(`${tag}：模式 '${mode}' 未在设备 ${eq} 的模式表中声明（引用错误）`);
+      }
+    });
+  }
+
   state.links.forEach((ln, i) => {
     const tag = `约束 ${i + 1}（${ln.from_id} → ${ln.to_id}）`;
     if (ln.from_id === ln.to_id) errors.push(`${tag}：不能衔接自身`);
@@ -212,6 +369,7 @@ async function solve() {
       latest_start: e.latest_start,
       equipment: String(e.equipment).trim(),
       cooling: e.cooling,
+      mode: state.modeEnabled ? String(e.mode || "").trim() : "",
     })),
     links: state.links.map((l) => ({
       from_id: l.from_id,
@@ -219,6 +377,7 @@ async function solve() {
       min_gap: l.min_gap,
       max_gap: l.max_gap === "" ? null : l.max_gap,
     })),
+    modes: state.modeEnabled ? buildModesPayload() : {},
   };
 
   const btn = $("#solve-btn");
@@ -286,8 +445,32 @@ function renderResult(r) {
   drawGantt(r);
   drawOrders(r.equipment_orders);
   drawSlacks(r.slacks);
+  drawCalibrations(r.calibrations || []);
 
   $("#result-panel").classList.remove("hidden");
+}
+
+function drawCalibrations(calibrations) {
+  const wrap = $("#calibration-wrap");
+  const tbody = $("#calibration-table tbody");
+  if (!state.modeEnabled || !calibrations.length) {
+    wrap.classList.add("hidden");
+    tbody.innerHTML = "";
+    return;
+  }
+  tbody.innerHTML = calibrations
+    .map((c) => `<tr>
+      <td>${escapeHtml(c.equipment)}</td>
+      <td>${c.predecessor_id === null ? '<span class="muted">初始模式</span>' : escapeHtml(c.predecessor_id)}</td>
+      <td>${escapeHtml(c.successor_id)}</td>
+      <td>${escapeHtml(c.from_mode)} → ${escapeHtml(c.to_mode)}</td>
+      <td>${c.start}</td>
+      <td>${c.finish}</td>
+      <td>${c.duration}</td>
+      <td>${c.margin}</td>
+    </tr>`)
+    .join("");
+  wrap.classList.remove("hidden");
 }
 
 function drawOrders(orders) {
@@ -341,6 +524,7 @@ function drawGantt(r) {
 
   const maxT = Math.max(
     ...exps.map((e, i) => r.finishes[i] + e.cooling),
+    ...(r.calibrations || []).map((c) => c.finish),
     ...exps.map((e) => e.latest_start),
     1
   );
@@ -438,7 +622,41 @@ function drawGantt(r) {
       lab.setAttribute("font-weight", "700");
       lab.textContent = e.id;
       svg.appendChild(lab);
+
+      // Selected-mode tag.
+      if (state.modeEnabled && e.mode) {
+        const mt = document.createElementNS(svgNS, "text");
+        mt.setAttribute("x", x(finish) + 4);
+        mt.setAttribute("y", top + 23);
+        mt.setAttribute("fill", "#ffc857");
+        mt.setAttribute("font-size", "10");
+        mt.setAttribute("font-weight", "600");
+        mt.textContent = e.mode;
+        svg.appendChild(mt);
+      }
     });
+
+    // Mode-switch calibration blocks (exclusive occupancy on this equipment).
+    (r.calibrations || [])
+      .filter((c) => c.equipment === eq)
+      .forEach((c) => {
+        if (c.duration <= 0) return;
+        const rect = document.createElementNS(svgNS, "rect");
+        rect.setAttribute("x", x(c.start));
+        rect.setAttribute("y", top + 6);
+        rect.setAttribute("width", Math.max(c.duration * unit - 1, 2));
+        rect.setAttribute("height", 26);
+        rect.setAttribute("fill", "#ffc857");
+        rect.setAttribute("opacity", "0.9");
+        rect.setAttribute("rx", "3");
+        const title = document.createElementNS(svgNS, "title");
+        title.textContent =
+          `校准 ${c.from_mode}→${c.to_mode}（${c.start} → ${c.finish}，` +
+          `前项 ${c.predecessor_id === null ? "初始模式" : c.predecessor_id}，` +
+          `后项 ${c.successor_id}，对后项余量 ${c.margin}）`;
+        rect.appendChild(title);
+        svg.appendChild(rect);
+      });
   });
 
   host.appendChild(svg);
@@ -459,6 +677,10 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   }[c]));
+}
+
+function escapeAttr(s) {
+  return escapeHtml(s ?? "");
 }
 
 let flashTimer = null;
@@ -497,7 +719,7 @@ $("#add-exp").addEventListener("click", () => {
   state.exposures.push({
     id: String.fromCharCode(65 + n),
     duration: 1, earliest_start: 0, latest_start: 100,
-    equipment: "X", cooling: 0,
+    equipment: "X", cooling: 0, mode: "",
   });
   markDirty();
   renderAll();
@@ -524,6 +746,12 @@ $("#add-link").addEventListener("click", () => {
 $("#horizon").addEventListener("input", (ev) => {
   state.horizon = ev.target.value === "" ? 0 : Number(ev.target.value);
   markDirty();
+});
+$("#mode-enabled").addEventListener("change", (ev) => {
+  state.modeEnabled = ev.target.checked;
+  // Toggling the feature changes what the request means: old plan is dead.
+  markDirty();
+  renderAll();
 });
 $("#solve-btn").addEventListener("click", solve);
 

@@ -27,12 +27,25 @@
             <tr>
               <th>#</th><th>编号</th><th>持续时间</th>
               <th>最早开始</th><th>最晚开始</th>
-              <th>设备</th><th>冷却时间</th><th></th>
+              <th>设备</th><th>冷却时间</th><th>读出模式</th><th></th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>读出模式校准（可选）</h2>
+        <label class="enable-toggle">
+          <input id="mode-enabled" type="checkbox" /> 启用模式切换排程
+        </label>
+      </div>
+      <p class="hint">为每台设备登记<strong>初始模式</strong>与<strong>有向切换</strong>耗时，并在曝光表中为每项曝光选择所需模式。
+      首项从初始模式切换，后续仅沿同设备紧邻前项切换；<strong>未登记的不同模式转换不可达，绝不按零耗时处理</strong>。
+      校准在前段冷却结束后连续占机，并须在后项开始前完成。未启用时请求与原有排程完全兼容。</p>
+      <div id="mode-editor" class="mode-editor disabled-paint"></div>
     </section>
 
     <section class="card">
@@ -77,7 +90,7 @@
     <section id="infeasible-panel" class="card warn-card hidden">
       <h2>无可执行时序</h2>
       <p>输入通过了全部校验，但不存在同时满足时间窗、设备占用（含冷却）与衔接约束的整数开始时刻组合。</p>
-      <p class="hint">建议：放宽最晚开始时刻、缩短冷却、错开设备或放松最大衔接间隔。不会返回任何部分曝光方案，也不会沿用旧方案。</p>
+      <p class="hint">建议：放宽最晚开始时刻、缩短冷却、错开设备、放松最大衔接间隔，或在模式表中补齐所需的有向转换（缺失转换不会按零耗时处理）。不会返回任何部分曝光方案，也不会沿用旧方案。</p>
     </section>
 
     <section id="result-panel" class="card hidden">
@@ -94,11 +107,25 @@
       <div class="legend">
         <span class="legend-item"><i class="sw exposure"></i>曝光执行</span>
         <span class="legend-item"><i class="sw cooling"></i>设备冷却占用</span>
+        <span class="legend-item"><i class="sw calibration"></i>模式切换校准</span>
         <span class="legend-item"><i class="sw window"></i>可开始时间窗</span>
       </div>
 
       <h3>设备执行顺序</h3>
       <div id="equipment-orders" class="orders"></div>
+
+      <div id="calibration-wrap" class="hidden">
+        <h3>模式切换校准段</h3>
+        <div class="table-wrap">
+          <table id="calibration-table">
+            <thead>
+              <tr><th>设备</th><th>紧邻前项</th><th>后项</th><th>前模式 → 后模式</th>
+              <th>起始</th><th>完成</th><th>校准耗时</th><th>对后项开始余量</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
 
       <h3>每条约束余量</h3>
       <div class="table-wrap">
