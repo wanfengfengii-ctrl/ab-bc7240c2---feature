@@ -27,12 +27,31 @@
             <tr>
               <th>#</th><th>编号</th><th>持续时间</th>
               <th>最早开始</th><th>最晚开始</th>
-              <th>设备</th><th>冷却时间</th><th></th>
+              <th>设备</th><th>冷却时间</th>
+              <th class="mode-col">读出模式</th><th></th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="card" id="modes-card">
+      <div class="card-head">
+        <h2>读出模式切换校准（可选）</h2>
+        <label class="enable-toggle">
+          <input type="checkbox" id="modes-enabled" /> 启用模式切换排程
+        </label>
+      </div>
+      <div id="modes-body" class="hidden">
+        <p class="hint">
+          为每台探测器登记<strong>初始读出模式</strong>与<strong>有向</strong>切换耗时：a→b 与 b→a 需分别登记，
+          未登记的有向转换视为<strong style="color:var(--warn)">不可达</strong>（绝非零耗时）。
+          校准将在紧邻前项冷却结束后连续独占设备，并于后项开始前完成；首项从初始模式切换。
+        </p>
+        <div id="mode-configs"></div>
+      </div>
+      <div id="modes-off-hint" class="hint">未启用：按原方式求解，不包含任何模式校准段。</div>
     </section>
 
     <section class="card">
@@ -94,11 +113,26 @@
       <div class="legend">
         <span class="legend-item"><i class="sw exposure"></i>曝光执行</span>
         <span class="legend-item"><i class="sw cooling"></i>设备冷却占用</span>
+        <span class="legend-item"><i class="sw calib"></i>模式切换校准（独占）</span>
         <span class="legend-item"><i class="sw window"></i>可开始时间窗</span>
       </div>
 
       <h3>设备执行顺序</h3>
       <div id="equipment-orders" class="orders"></div>
+
+      <h3 id="cal-title" class="hidden">模式切换校准段</h3>
+      <div class="table-wrap hidden" id="cal-wrap">
+        <table id="cal-table">
+          <thead>
+            <tr>
+              <th>设备</th><th>前项</th><th>后项</th>
+              <th>模式变化</th><th>切换耗时</th>
+              <th>校准起</th><th>校准止</th><th>等待余量</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
 
       <h3>每条约束余量</h3>
       <div class="table-wrap">

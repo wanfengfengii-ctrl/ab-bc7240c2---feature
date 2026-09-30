@@ -4,13 +4,22 @@
 const state = {
   horizon: 1000,
   exposures: [
-    { id: "A", duration: 4, earliest_start: 0, latest_start: 50, equipment: "X", cooling: 2 },
-    { id: "B", duration: 3, earliest_start: 0, latest_start: 50, equipment: "X", cooling: 1 },
-    { id: "C", duration: 5, earliest_start: 0, latest_start: 50, equipment: "Y", cooling: 0 },
-    { id: "D", duration: 2, earliest_start: 0, latest_start: 50, equipment: "Y", cooling: 3 },
-    { id: "E", duration: 6, earliest_start: 2, latest_start: 40, equipment: "Z", cooling: 0 },
+    { id: "A", duration: 4, earliest_start: 0, latest_start: 50, equipment: "X", cooling: 2, mode: "fast" },
+    { id: "B", duration: 3, earliest_start: 0, latest_start: 50, equipment: "X", cooling: 1, mode: "fast" },
+    { id: "C", duration: 5, earliest_start: 0, latest_start: 50, equipment: "Y", cooling: 0, mode: "fast" },
+    { id: "D", duration: 2, earliest_start: 0, latest_start: 50, equipment: "Y", cooling: 3, mode: "fine" },
+    { id: "E", duration: 6, earliest_start: 2, latest_start: 40, equipment: "Z", cooling: 0, mode: "fast" },
   ],
   links: [{ from_id: "A", to_id: "B", min_gap: 0, max_gap: "" }],
+  modesEnabled: false,
+  // Keyed by equipment name: { initial: string, transitions: [{from,to,dur}] }
+  modeConfigs: {
+    X: { initial: "fast", transitions: [{ from: "fast", to: "fine", dur: 3 }] },
+    Y: { initial: "fast", transitions: [
+      { from: "fast", to: "fine", dur: 2 }, { from: "fine", to: "fast", dur: 4 },
+    ] },
+    Z: { initial: "fast", transitions: [] },
+  },
   result: null,
   stale: false,
 };
@@ -32,6 +41,8 @@ function renderExpRows() {
       <td><input type="number" min="0" step="1" data-i="${i}" data-k="latest_start" value="${row.latest_start}"></td>
       <td class="cell-eq"><input data-i="${i}" data-k="equipment" value="${row.equipment}"></td>
       <td><input type="number" min="0" step="1" data-i="${i}" data-k="cooling" value="${row.cooling}"></td>
+      <td class="mode-cell"><input data-i="${i}" data-k="mode" class="mode-input${state.modesEnabled ? "" : " disabled"}"
+        placeholder="${state.modesEnabled ? "必填" : "未启用"}" value="${row.mode || ""}"></td>
       <td><button type="button" class="btn secondary" data-del-i="${i}">删除</button></td>`;
     tbody.appendChild(tr);
   });
@@ -46,6 +57,7 @@ function renderExpRows() {
       }
       state.exposures.splice(Number(btn.dataset.delI), 1);
       reconcileLinks();
+      reconcileModeConfigs();
       markDirty();
       renderAll();
     });
@@ -57,9 +69,16 @@ function onExpInput(ev) {
   const i = Number(ev.target.dataset.i);
   const k = ev.target.dataset.k;
   let v = ev.target.value;
-  if (k !== "id" && k !== "equipment") v = v === "" ? "" : Number(v);
+  if (k !== "id" && k !== "equipment" && k !== "mode") v = v === "" ? "" : Number(v);
+  if (k === "equipment") {
+    renameModeConfig(state.exposures[i].equipment, String(v).trim());
+  }
   state.exposures[i][k] = v;
   if (k === "id") syncLinkIdOptions();
+  if (k === "equipment") {
+    reconcileModeConfigs();
+    renderModeConfigs();
+  }
   markDirty();
 }
 
@@ -122,9 +141,99 @@ function reconcileLinks() {
   state.links = state.links.filter((l) => ids.has(l.from_id) && ids.has(l.to_id));
 }
 
+/* ---------------- readout-mode config ---------------- */
+
+function equipmentNames() {
+  return [...new Set(state.exposures.map((e) => String(e.equipment || "").trim()).filter(Boolean))].sort();
+}
+
+function reconcileModeConfigs() {
+  const keep = new Set(equipmentNames());
+  for (const eq of Object.keys(state.modeConfigs)) {
+    if (!keep.has(eq)) delete state.modeConfigs[eq];
+  }
+  for (const eq of keep) {
+    if (!state.modeConfigs[eq]) {
+      state.modeConfigs[eq] = { initial: "", transitions: [] };
+    }
+  }
+}
+
+function renameModeConfig(oldName, newName) {
+  if (!oldName || !newName || oldName === newName) return;
+  if (state.modeConfigs[oldName] && !state.modeConfigs[newName]) {
+    state.modeConfigs[newName] = state.modeConfigs[oldName];
+    delete state.modeConfigs[oldName];
+  }
+}
+
+function renderModeConfigs() {
+  reconcileModeConfigs();
+  const host = $("#mode-configs");
+  host.innerHTML = "";
+  equipmentNames().forEach((eq) => {
+    const cfg = state.modeConfigs[eq];
+    const box = document.createElement("div");
+    box.className = "mode-cfg";
+    const rows = cfg.transitions.map((tr, ti) => `
+      <tr>
+        <td><input data-eq="${eq}" data-ti="${ti}" data-tk="from" value="${tr.from || ""}" placeholder="源模式"></td>
+        <td class="arrow">→</td>
+        <td><input data-eq="${eq}" data-ti="${ti}" data-tk="to" value="${tr.to || ""}" placeholder="目标模式"></td>
+        <td><input type="number" min="0" step="1" data-eq="${eq}" data-ti="${ti}" data-tk="dur" value="${tr.dur === "" || tr.dur === undefined ? "" : tr.dur}"></td>
+        <td><button type="button" class="btn secondary" data-del-tr="${eq}" data-ti="${ti}">删除</button></td>
+      </tr>`).join("");
+    box.innerHTML = `
+      <div class="mode-cfg-head">
+        <span class="eq-name">设备 ${escapeHtml(eq)}</span>
+        <label>初始模式：<input data-eq-init="${eq}" class="init-input" value="${cfg.initial || ""}" placeholder="如 fast"></label>
+      </div>
+      <table class="tr-table">
+        <thead><tr><th>源模式</th><th></th><th>目标模式</th><th>有向切换耗时</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="muted">尚未登记任何有向转换；不同模式相邻将不可达。</td></tr>`}</tbody>
+      </table>
+      <button type="button" class="btn secondary" data-add-tr="${eq}">＋ 添加转换（${escapeHtml(eq)}）</button>`;
+    host.appendChild(box);
+  });
+
+  host.querySelectorAll("input[data-eq-init]").forEach((inp) => {
+    inp.addEventListener("input", (ev) => {
+      state.modeConfigs[ev.target.dataset.eqInit].initial = ev.target.value.trim();
+      markDirty();
+    });
+  });
+  host.querySelectorAll("input[data-eq]").forEach((inp) => {
+    inp.addEventListener("input", (ev) => {
+      const cfg = state.modeConfigs[ev.target.dataset.eq];
+      const tr = cfg.transitions[Number(ev.target.dataset.ti)];
+      const tk = ev.target.dataset.tk;
+      tr[tk] = tk === "dur" ? (ev.target.value === "" ? "" : Number(ev.target.value)) : ev.target.value.trim();
+      markDirty();
+    });
+  });
+  host.querySelectorAll("button[data-add-tr]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.modeConfigs[btn.dataset.addTr].transitions.push({ from: "", to: "", dur: "" });
+      markDirty();
+      renderModeConfigs();
+    });
+  });
+  host.querySelectorAll("button[data-del-tr]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const cfg = state.modeConfigs[btn.dataset.delTr];
+      cfg.transitions.splice(Number(btn.dataset.ti), 1);
+      markDirty();
+      renderModeConfigs();
+    });
+  });
+}
+
+/* ---------------- render all ---------------- */
+
 function renderAll() {
   renderExpRows();
   renderLinkRows();
+  renderModeConfigs();
 }
 
 /* ---------------- draft invalidation ---------------- */
@@ -186,10 +295,96 @@ function validateDraft() {
         errors.push(`${tag}：最大间隔小于最小间隔`);
     }
   });
+
+  if (state.modesEnabled) errors.push(...validateModeDraft());
+  return errors;
+}
+
+function validateModeDraft() {
+  const errors = [];
+  reconcileModeConfigs();
+  equipmentNames().forEach((eq) => {
+    const cfg = state.modeConfigs[eq];
+    if (!String(cfg.initial || "").trim())
+      errors.push(`设备 ${eq}：未登记初始读出模式`);
+    const seen = new Set();
+    cfg.transitions.forEach((tr, ti) => {
+      const tag = `设备 ${eq} 第 ${ti + 1} 条转换`;
+      const a = String(tr.from || "").trim();
+      const b = String(tr.to || "").trim();
+      if (!a || !b) errors.push(`${tag}：源模式与目标模式均不能为空`);
+      if (a && b && a === b) errors.push(`${tag}：同模式相邻无需校准，不能登记自转换 ${a}→${b}`);
+      if (!Number.isInteger(tr.dur) || tr.dur < 0)
+        errors.push(`${tag}：切换耗时必须为非负整数`);
+      const key = `${a}→${b}`;
+      if (a && b && seen.has(key))
+        errors.push(`设备 ${eq}：有向转换 ${key} 重复登记且耗时冲突`);
+      seen.add(key);
+    });
+  });
+  state.exposures.forEach((e, idx) => {
+    const tag = `第 ${idx + 1} 项（${e.id || "未命名"}）`;
+    const m = String(e.mode || "").trim();
+    if (!m) {
+      errors.push(`${tag}：启用模式切换后必须为每项曝光选择读出模式`);
+      return;
+    }
+    const eq = String(e.equipment || "").trim();
+    const cfg = state.modeConfigs[eq];
+    if (cfg) {
+      const known = new Set([String(cfg.initial || "").trim()]);
+      cfg.transitions.forEach((tr) => {
+        known.add(String(tr.from || "").trim());
+        known.add(String(tr.to || "").trim());
+      });
+      known.delete("");
+      if (!known.has(m))
+        errors.push(`${tag}：模式 '${m}' 未在设备 '${eq}' 的初始模式或转换表中登记`);
+    }
+  });
   return errors;
 }
 
 /* ---------------- solve ---------------- */
+
+function buildPayload() {
+  const payload = {
+    horizon: state.horizon,
+    exposures: state.exposures.map((e) => {
+      const out = {
+        id: String(e.id).trim(),
+        duration: e.duration,
+        earliest_start: e.earliest_start,
+        latest_start: e.latest_start,
+        equipment: String(e.equipment).trim(),
+        cooling: e.cooling,
+      };
+      if (state.modesEnabled) out.mode = String(e.mode || "").trim();
+      return out;
+    }),
+    links: state.links.map((l) => ({
+      from_id: l.from_id,
+      to_id: l.to_id,
+      min_gap: l.min_gap,
+      max_gap: l.max_gap === "" ? null : l.max_gap,
+    })),
+  };
+  if (state.modesEnabled) {
+    payload.readout_modes = equipmentNames().map((eq) => {
+      const cfg = state.modeConfigs[eq];
+      return {
+        equipment: eq,
+        initial_mode: String(cfg.initial || "").trim(),
+        transitions: cfg.transitions.map((tr) => ({
+          from_mode: String(tr.from || "").trim(),
+          to_mode: String(tr.to || "").trim(),
+          duration: tr.dur,
+        })),
+      };
+    });
+  }
+  return payload;
+}
 
 async function solve() {
   if (state.stale === false && state.result) return;
@@ -203,23 +398,7 @@ async function solve() {
     return;
   }
 
-  const payload = {
-    horizon: state.horizon,
-    exposures: state.exposures.map((e) => ({
-      id: String(e.id).trim(),
-      duration: e.duration,
-      earliest_start: e.earliest_start,
-      latest_start: e.latest_start,
-      equipment: String(e.equipment).trim(),
-      cooling: e.cooling,
-    })),
-    links: state.links.map((l) => ({
-      from_id: l.from_id,
-      to_id: l.to_id,
-      min_gap: l.min_gap,
-      max_gap: l.max_gap === "" ? null : l.max_gap,
-    })),
-  };
+  const payload = buildPayload();
 
   const btn = $("#solve-btn");
   btn.disabled = true;
@@ -286,6 +465,7 @@ function renderResult(r) {
   drawGantt(r);
   drawOrders(r.equipment_orders);
   drawSlacks(r.slacks);
+  drawCalibrations(r.calibrations);
 
   $("#result-panel").classList.remove("hidden");
 }
@@ -296,12 +476,17 @@ function drawOrders(orders) {
   orders.forEach((o) => {
     const row = document.createElement("div");
     row.className = "order-row";
+    const initTag = o.initial_mode !== undefined && o.initial_mode !== null
+      ? `<span class="init-tag">初始 ${escapeHtml(o.initial_mode)}</span>` : "";
     row.innerHTML =
-      `<span class="eq-name">${escapeHtml(o.equipment)}</span>` +
+      `<span class="eq-name">${escapeHtml(o.equipment)}</span>${initTag}` +
       o.sequence
-        .map((id, i) =>
-          (i ? '<span class="arrow">→</span>' : "") +
-          `<span class="chip">${escapeHtml(id)}</span>`)
+        .map((id, i) => {
+          const modeTag = o.modes
+            ? `<span class="mode-tag">${escapeHtml(o.modes[i])}</span>` : "";
+          return (i ? '<span class="arrow">→</span>' : "") +
+            `<span class="chip">${escapeHtml(id)}${modeTag}</span>`;
+        })
         .join("");
     box.appendChild(row);
   });
@@ -327,6 +512,35 @@ function drawSlacks(slacks) {
     .join("");
 }
 
+function drawCalibrations(calibrations) {
+  const title = $("#cal-title");
+  const wrap = $("#cal-wrap");
+  if (!Array.isArray(calibrations)) {
+    title.classList.add("hidden");
+    wrap.classList.add("hidden");
+    return;
+  }
+  title.classList.remove("hidden");
+  wrap.classList.remove("hidden");
+  const tbody = $("#cal-table tbody");
+  if (!calibrations.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="muted">设备顺序中相邻曝光模式均相同，本次排程无需切换校准。</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = calibrations
+    .map((c) => `<tr>
+      <td>${escapeHtml(c.equipment)}</td>
+      <td>${c.prev_exposure_id === null ? '<span class="muted">初始模式</span>' : escapeHtml(c.prev_exposure_id)}</td>
+      <td>${escapeHtml(c.exposure_id)}</td>
+      <td>${escapeHtml(c.from_mode)} <span class="arrow">→</span> ${escapeHtml(c.to_mode)}</td>
+      <td>${c.switch_duration}</td>
+      <td>${c.cal_start}</td>
+      <td>${c.cal_end}</td>
+      <td>${c.wait_margin}</td>
+    </tr>`)
+    .join("");
+}
+
 /* ---------------- SVG gantt ---------------- */
 
 function drawGantt(r) {
@@ -338,9 +552,13 @@ function drawGantt(r) {
   exps.forEach((e, i) => {
     byEq.get(e.equipment).push({ e, i, start: r.starts[i], finish: r.finishes[i] });
   });
+  const cals = Array.isArray(r.calibrations) ? r.calibrations : [];
+  const calsByEq = new Map(eqNames.map((q) => [q, []]));
+  cals.forEach((c) => { if (calsByEq.has(c.equipment)) calsByEq.get(c.equipment).push(c); });
 
   const maxT = Math.max(
     ...exps.map((e, i) => r.finishes[i] + e.cooling),
+    ...cals.map((c) => c.cal_end),
     ...exps.map((e) => e.latest_start),
     1
   );
@@ -389,6 +607,25 @@ function drawGantt(r) {
     lbl.textContent = eq;
     svg.appendChild(lbl);
 
+    // calibration segments (drawn first, beneath exposure blocks)
+    calsByEq.get(eq).forEach((c) => {
+      const rect = document.createElementNS(svgNS, "rect");
+      rect.setAttribute("x", x(c.cal_start));
+      rect.setAttribute("y", top + 14);
+      rect.setAttribute("width", Math.max((c.cal_end - c.cal_start) * unit - 1, 2));
+      rect.setAttribute("height", 12);
+      rect.setAttribute("fill", "#ffc857");
+      rect.setAttribute("opacity", "0.9");
+      rect.setAttribute("rx", "2");
+      const prev = c.prev_exposure_id === null ? "初始模式" : c.prev_exposure_id;
+      const title = document.createElementNS(svgNS, "title");
+      title.textContent =
+        `校准 ${prev} → ${c.exposure_id}：${c.from_mode}→${c.to_mode}，` +
+        `耗时 ${c.switch_duration}（${c.cal_start} → ${c.cal_end}），等待余量 ${c.wait_margin}`;
+      rect.appendChild(title);
+      svg.appendChild(rect);
+    });
+
     byEq.get(eq).forEach(({ e, i, start, finish }) => {
       // start-window band
       const win = document.createElementNS(svgNS, "rect");
@@ -426,7 +663,8 @@ function drawGantt(r) {
       b.setAttribute("fill", "#4da3ff");
       b.setAttribute("rx", "3");
       const t = document.createElementNS(svgNS, "title");
-      t.textContent = `${e.id}：开始 ${start}，结束 ${finish}，设备 ${e.equipment}`;
+      t.textContent = `${e.id}：开始 ${start}，结束 ${finish}，设备 ${e.equipment}` +
+        (e.mode ? `，模式 ${e.mode}` : "");
       b.appendChild(t);
       svg.appendChild(b);
 
@@ -436,7 +674,7 @@ function drawGantt(r) {
       lab.setAttribute("fill", "#0b1626");
       lab.setAttribute("font-size", "11");
       lab.setAttribute("font-weight", "700");
-      lab.textContent = e.id;
+      lab.textContent = e.mode ? `${e.id}·${e.mode}` : e.id;
       svg.appendChild(lab);
     });
   });
@@ -488,6 +726,16 @@ async function checkHealth() {
 
 /* ---------------- wiring ---------------- */
 
+$("#modes-enabled").addEventListener("change", (ev) => {
+  state.modesEnabled = ev.target.checked;
+  $("#modes-body").classList.toggle("hidden", !state.modesEnabled);
+  $("#modes-off-hint").classList.toggle("hidden", state.modesEnabled);
+  reconcileModeConfigs();
+  renderExpRows();
+  renderModeConfigs();
+  markDirty();
+});
+
 $("#add-exp").addEventListener("click", () => {
   if (state.exposures.length >= 10) {
     flashForm("最多 10 项曝光", true);
@@ -497,8 +745,9 @@ $("#add-exp").addEventListener("click", () => {
   state.exposures.push({
     id: String.fromCharCode(65 + n),
     duration: 1, earliest_start: 0, latest_start: 100,
-    equipment: "X", cooling: 0,
+    equipment: "X", cooling: 0, mode: "",
   });
+  reconcileModeConfigs();
   markDirty();
   renderAll();
 });
@@ -509,6 +758,7 @@ $("#del-exp").addEventListener("click", () => {
   }
   state.exposures.pop();
   reconcileLinks();
+  reconcileModeConfigs();
   markDirty();
   renderAll();
 });
